@@ -69,6 +69,7 @@ public:
     map_topic_          = declare_parameter<std::string>("map_topic", "/map");
     action_name_        = declare_parameter<std::string>("navigate_action", "/navigate_to_pose");
     planner_action_     = declare_parameter<std::string>("planner_action", "/compute_path_to_pose");
+    explore_topic_      = declare_parameter<std::string>("explore_topic", "/explore");
     global_frame_       = declare_parameter<std::string>("global_frame", "map");
     robot_frame_        = declare_parameter<std::string>("robot_frame", "base_link");
     free_thresh_        = declare_parameter<int>("free_threshold", 20);
@@ -131,6 +132,10 @@ public:
     qos.transient_local().reliable();
     map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
       map_topic_, qos, std::bind(&FrontierExplorer::onMap, this, std::placeholders::_1));
+    
+    // start/stop signal
+    explore_sub_ = create_subscription<std_msgs::msg::Bool>(
+      explore_topic_, qos, std::bind(&FrontierExplorer::onExplore, this, std::placeholders::_1));
 
     // Action clients
     nav_client_  = rclcpp_action::create_client<NavigateToPose>(this, action_name_);
@@ -154,6 +159,7 @@ public:
 private:
   // ---------- ROS plumbing ----------
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr explore_sub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr frontier_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr done_pub_;
   nav_msgs::msg::OccupancyGrid::SharedPtr map_;
@@ -172,6 +178,7 @@ private:
 
   // ---------- Params/state ----------
   std::string map_topic_;
+  std::string explore_topic_;
   std::string action_name_;
   std::string planner_action_;
   std::string global_frame_;
@@ -183,6 +190,7 @@ private:
   bool shutdown_on_done_;
   bool done_when_no_reachable_ = true;
   bool exploration_done_ = false;
+  bool do_exploration_ = false;
 
   // Viz
   double marker_line_width_;
@@ -975,9 +983,25 @@ private:
     if (shutdown_on_done_) rclcpp::shutdown();
   }
 
+  // ---- Explore callback ----------------
+  void onExplore(const std_msgs::msg::Bool::SharedPtr msg)
+  {
+    bool new_explore = msg->data;
+    if (do_exploration_)
+    {
+      // shut down current exploration
+      cancelCurrentGoal("stop requested via explore topic");
+      // save the current map
+      // todo - make exploration restartable (maybe a ros2 action is called for)
+      complete("stop requested via explore topic");
+    }
+    do_exploration_ = new_explore; 
+  }
+
   // ---------- Map callback & tick ----------
   void onMap(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
   {
+    if (!do_exploration_) return;
     if (exploration_done_) return;  // ignore late updates after completion
     map_ = msg;
     ensureBlacklistMask();
@@ -1026,7 +1050,7 @@ private:
              ( (done_when_no_reachable_ && stats_.reachable == 0) ||
                (stats_.after_inflation_and_blacklist == 0) ) )
         {
-          complete("No reachable frontiers remain 1038.");
+          complete("No reachable frontiers remain.");
         }
       }
       last_replan_time_ = now();
@@ -1035,6 +1059,7 @@ private:
 
   void tick()
   {
+    if (!do_exploration_) return;
     if (exploration_done_) return;
     if (!map_ || goal_active_ || precheck_active_) return;
 
@@ -1047,7 +1072,7 @@ private:
         ( (done_when_no_reachable_ && stats_.reachable == 0) ||
           (stats_.after_inflation_and_blacklist == 0) ) )
     {
-      complete("No reachable frontiers remain 1058.");
+      complete("No reachable frontiers remain.");
       return;
     }
 

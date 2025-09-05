@@ -14,6 +14,12 @@ This node was developed by attempting to inform GPT5 of my specifications and le
 
 ## launch/run
 
+Bring up your robot running SLAM in "mapping" mode (no map required):
+
+```ros2 launch ugv_bringup bringup_rtabmap.launch.py```
+
+and launch the explorer. This will explore until the map is sufficiently sampled, save a map, and go dormant.
+
 ```ros2 run frontier_explorer frontier_explorer_node```
 
 ## Work in progress!
