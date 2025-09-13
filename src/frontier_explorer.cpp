@@ -132,7 +132,7 @@ public:
     qos.transient_local().reliable();
     map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
       map_topic_, qos, std::bind(&FrontierExplorer::onMap, this, std::placeholders::_1));
-    
+
     // start/stop signal
     explore_sub_ = create_subscription<std_msgs::msg::Bool>(
       explore_topic_, qos, std::bind(&FrontierExplorer::onExplore, this, std::placeholders::_1));
@@ -987,7 +987,10 @@ private:
   void onExplore(const std_msgs::msg::Bool::SharedPtr msg)
   {
     bool new_explore = msg->data;
-    if (do_exploration_)
+    RCLCPP_INFO(get_logger(),
+      "Exploration receives /explore: %s\n",
+      new_explore ? "true" : "false");
+    if (!new_explore && do_exploration_)
     {
       // shut down current exploration
       cancelCurrentGoal("stop requested via explore topic");
@@ -995,24 +998,33 @@ private:
       // todo - make exploration restartable (maybe a ros2 action is called for)
       complete("stop requested via explore topic");
     }
-    do_exploration_ = new_explore; 
+    else if (new_explore && !do_exploration_)
+    {
+        if (map_) onMapInternal();
+    }
+    do_exploration_ = new_explore;
+    //publishFrontierMarkers({}, {}, std::nullopt);
   }
 
   // ---------- Map callback & tick ----------
   void onMap(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
   {
-    if (!do_exploration_) return;
     if (exploration_done_) return;  // ignore late updates after completion
     map_ = msg;
+    if (do_exploration_) onMapInternal();
+  }
+
+  void onMapInternal()
+  {
     ensureBlacklistMask();
     ensureInflatedMask();
 
     // Adopt frame if requested and not yet adopted
     static bool adopted = false;
-    if (auto_global_frame_ && !adopted && !msg->header.frame_id.empty() && global_frame_ != msg->header.frame_id) {
+    if (auto_global_frame_ && !adopted && !map_->header.frame_id.empty() && global_frame_ != map_->header.frame_id) {
       RCLCPP_INFO(get_logger(), "Auto-set global_frame to map header: '%s' -> '%s'",
-                  global_frame_.c_str(), msg->header.frame_id.c_str());
-      global_frame_ = msg->header.frame_id;
+                  global_frame_.c_str(), map_->header.frame_id.c_str());
+      global_frame_ = map_->header.frame_id;
       adopted = true;
     }
 
